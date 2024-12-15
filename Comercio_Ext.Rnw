@@ -1,0 +1,657 @@
+%Clase del documento: Artículo académico
+\documentclass[titlepage, 12pt]{article}
+
+%Preámbulo: paquetes
+\usepackage{babel}[spanish]
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[a4paper, lmargin=2.5cm, rmargin=2.5cm, bottom=2.7cm, top=2.7cm]{geometry}
+\usepackage{subcaption}
+\usepackage{setspace}
+\renewcommand{\contentsname}{Contenido} %Renombrar la página de "Contenido"
+%\usepackage{fontspec} %Para el tipo de letra
+\usepackage{lmodern}
+\usepackage{natbib} %Paquete para fuentes APA
+\bibliographystyle{apalike}
+\usepackage{url}
+\usepackage[colorlinks=false, hidelinks]{hyperref} %título de secciones, fuentes y figuras como enlaces
+\usepackage[bottom]{footmisc}
+\usepackage{changepage}
+\usepackage{float}
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+\onehalfspacing %Interlineado de 1.5 para todo el documento.
+
+%================ Portada
+\begin{titlepage}
+\centering
+{\bfseries\Large Universidad Nacional Autónoma de México \par}
+\vspace{0.5cm}
+{\bfseries\Large Facultad de Estudios Superiores Aragón \par}
+\vspace{0.5cm}
+{\bfseries\Large División de Ciencias Sociales \par}
+\vspace{0.5cm}
+{\bfseries\Large Licenciatura en Economía \par}
+\vspace{5cm}
+{\bfseries\Large Ensayo Final: \par}
+\vspace{0.4cm}
+{\Large Comercio exterior mexicano: hacia un panorama desafiante \par}
+\vspace{0.4cm}
+{\Large Balanza de Pagos \par}
+\vspace{0.4cm}
+{\Large Semestre 2025-1 \par}
+\vspace{5cm}
+{\raggedleft\large Roberto Valdez Rivera \par}
+\vspace{0.4cm}
+{\raggedleft\large 21 de noviembre de 2024 \par}
+\end{titlepage}
+
+\addto\captionsspanish{
+  \renewcommand{\refname}{Referencias}
+}
+
+%============Comienzo del documento
+\pagebreak
+\tableofcontents
+% Manejo inicial de los datos:
+<<echo=FALSE, warning=F>>=
+#============================ Instalar paqueterías necesarias:
+library(tidyverse)
+library(scales)
+library(readxl)
+library(extrafont)
+library(fontcm)
+library(patchwork)
+library(RColorBrewer)
+@
+
+<<echo=FALSE, warning=F>>=
+#=========================== Manejo de los datos a utilizar:
+s <- read.csv("Balanza_P_1980-2024.csv", skip=17)
+s$Fecha <-  as.Date(s$Fecha, format="%d/%m/%Y") #Transformar a formato Fecha
+
+#======= Agrupar por año y obtener suma anual:
+s <- s %>%
+  mutate(año = year(Fecha)) #Transformar los trimestres a años
+s <- s %>% select(-Fecha) %>% group_by(año) %>% 
+  summarise(across(everything(),sum)) #Sumar para obtener cifras anuales
+s$año <- ymd(paste0(s$año, "-01-01"))
+
+#función para dividir por 1,000
+excluir <- "año"
+s[ , !(names(s) %in% excluir)] <- lapply(s[ , !(names(s) %in% excluir)], function(x) x / 1000)
+
+#======= Abrir el archivo que contine las X e M por tipo:
+#=== Exportaciones
+s2 <- read_xlsx("BC_portipo_1980-2024.xlsx", sheet = 1)
+s2$año <- ymd(paste0(s2$año, "-01"))
+s2 <- s2%>% mutate(año=year(año))
+s2 <- s2%>%group_by(año)%>% summarise(across(everything(), sum))
+s2$año <- ymd(paste0(s2$año, "-01-01"))
+#Dividir por mil las variables:
+s2[ , !(names(s2) %in% excluir)] <- lapply(s2[ , !(names(s2) %in% excluir)], function(x) x / 1000)
+# Transformar a formato largo:
+s2_l <- pivot_longer(s2, cols = starts_with("Bienes"), names_to = "Tipo", values_to = "valores")
+
+#== Importaciones
+s3 <- read_xlsx("BC_portipo_1980-2024.xlsx", sheet = 2)
+s3$año <- ymd(paste0(s3$año, "-01"))
+s3 <- s3%>% mutate(año=year(año))
+s3 <- s3%>%group_by(año)%>% summarise(across(everything(), sum))
+s3$año <- ymd(paste0(s3$año, "-01-01"))
+#Dividir por 1,000 las cifras:
+s3[ , !(names(s3) %in% excluir)] <- lapply(s3[ , !(names(s3) %in% excluir)], function(x) x / 1000)
+# Transformar a formato largo:
+s3_l <- pivot_longer(s3, cols = starts_with("Bienes"), names_to = "Tipo", values_to = "valores")
+@
+
+<<echo=FALSE, warning=F>>=
+#Obtener los saldos de las balanzas de la CC:
+s <- s %>% mutate(b_c=x-m, #Balanza comercial
+                  b_s=i_servicios-e_servicios, #Balanza de servicios
+                  b_ip=i_fact-e_fact, #Balanza ingreso primario
+                  b_is=i_trans-e_trans #Balanza de ingreso secundario
+                  )
+#Transformar a formato largo:
+s_cc <- s %>% select(-(c_corriente:e_omisiones)) %>%
+  pivot_longer(cols=starts_with("b_"),
+               names_to="variable", values_to = "valores")
+
+# Composición entre Inversiónd directa y de cartera:
+s_ie <- s %>% select(año, ie_directa, ie_cartera)%>%
+  pivot_longer(cols=c(ie_directa,ie_cartera),
+               names_to = "tipo",values_to = "valores") %>%
+  mutate(i=recode(tipo, "ie_directa"="Inversión directa",
+                  "ie_cartera"="Inversión de cartera"))
+@
+
+<<echo=FALSE, warning=F>>=
+##============ Exportaciones por país destino:
+x <- read_xlsx("xm_por_pais.xlsx", skip=2, sheet=1) %>%
+  select(c(Fecha,africa, canada,estados_unidos,america_sur,antillas,
+           centroamerica, asia,china,
+           europa,oceania,no_ident))%>%mutate(asia_c=asia-china)%>%select(-asia)
+x$Fecha <- as.Date(x$Fecha, format="%Y-%m-%d") #Transformar a formato fecha
+# Agrupar para obtener la suma anual:
+x <- x %>%
+  mutate(año = year(Fecha)) #Transformar los meses a años
+x <- x %>% select(-Fecha) %>% group_by(año) %>% 
+  summarise(across(everything(),sum)) #Sumar para obtener cifras anuales
+x$año <- ymd(paste0(x$año, "-01-01"))
+#Dividir por un millón las variables:
+x[ , !(names(x) %in% excluir)] <- lapply(x[ , !(names(x) %in% excluir)], function(x) x / 1000000)
+# Transformar a formato largo:
+x_l <- x%>% pivot_longer(cols = c(africa:asia_c),
+                         names_to = "pais", values_to = "valores")
+x_l<- x_l %>% mutate(p=case_when(
+  pais!="estados_unidos" & pais!="canada" & pais !="china" ~ "otro",
+  TRUE ~ as.character(pais)
+))
+x_l <- x_l%>% mutate(p=recode(p,"canada"="Canadá",
+                         "estados_unidos"="Estados Unidos","china" ="China",
+                         "otro"="Otro"))
+
+#=============== Importaciones por procedencia:
+m <- read_xlsx("xm_por_pais.xlsx", skip=2, sheet=2) %>% 
+  select(c(Fecha,africa, canada,estados_unidos,america_sur,antillas,
+           centroamerica, asia,china,
+           europa,oceania,no_ident))%>%mutate(asia_c=asia-china)%>%select(-asia)
+m$Fecha <- as.Date(m$Fecha, format="%Y-%m-%d") #Transformar a formato fecha
+# Agrupar para obtener la suma anual:
+m <- m %>%
+  mutate(año = year(Fecha)) #Transformar los meses a años
+m <- m %>% select(-Fecha) %>% group_by(año) %>% 
+  summarise(across(everything(),sum)) #Sumar para obtener cifras anuales
+m$año <- ymd(paste0(m$año, "-01-01"))
+#Dividir por un millón las variables:
+m[ , !(names(m) %in% excluir)] <- lapply(m[ , !(names(m) %in% excluir)], function(x) x / 1000000)
+# Transformar a formato largo:
+m_l <- m%>% pivot_longer(cols = c(africa:asia_c),
+                         names_to = "pais", values_to = "valores")
+m_l<- m_l %>% mutate(p=case_when(
+  pais!="estados_unidos" & pais!="canada" & pais!="china" ~ "otro",
+  TRUE ~ as.character(pais)
+  ))
+m_l <- m_l%>% mutate(p=recode(p,"canada"="Canadá",
+                         "estados_unidos"="Estados Unidos", "china"="China",
+                         "otro"="Otro"))
+@
+
+<<echo=FALSE, warning=F>>=
+#=========== Inversión Extranjera total:
+# Serie de tiempo de la ied
+ied <- read_xlsx("ied_2006-2024.xlsx",sheet=2) %>% select(-total) %>%
+  pivot_longer(cols=c(nuevas_inversiones:cuentas_entre_compañias), 
+               names_to = "tipo", values_to = "valores")
+ied <- ied%>%mutate(i=recode(tipo, "nuevas_inversiones"= "Nuevas inversiones",
+                             "reinversion_utilidades"="Reinversión de utilidades",
+                             "cuentas_entre_compañias"="Cuentas entre compañías"))
+
+#========== Inversión Extranjera directa por país: 
+ied_p <- read_xlsx("ied_2006-2024.xlsx", sheet=5) %>%
+  pivot_longer(cols=c(Alemania:Otros),names_to = "pais",
+               values_to = "valores")
+ied_p<- ied_p %>% mutate(p=case_when(
+  pais!="Estados Unidos" & pais!="Canadá" & pais!="China" & pais!="España" & pais!= "Alemania" ~ "Otros paises",
+  TRUE ~ as.character(pais)
+  ))
+@
+
+
+\setlength{\parskip}{0.18cm} % Espacio después de cada párrafo
+
+\pagebreak
+\section*{Introducción}
+\addcontentsline{toc}{section}{Introducción}
+\sloppy
+En la actualidad la economía mexicana se enfrenta a serios desafíos que amenazan con estructurar la situación que ha generado el largo periodo de la globalización desde la década de los noventa del siglo pasado. Es imperante la necesidad de analizar cuáles fueron las condiciones que propiciaron el sistema actual, en qué condiciones nos encontramos y, con un amplio margen a fallar, aventurarnos a realizar conjeturas acerca del camino que debe seguirse. 
+
+A partir de la estrecha relación que México ha profundizado con los Estados Unidos en materia comercial, económica, política y social, la estructura nacional se ha subordinado a la estadounidense para servir como suministrador de insumos para la industria norteamericana. La apertura comercial, a través de las políticas de liberalización, han acelerado estas relaciones. El contexto internacional contemporáneo ha contribuido a encaminar a la globalización en un proceso que podría beneficiar o, en el peor de los casos, extender la situación actual por medio del \textit{nearshoring}.
+
+El presente trabajo tiene el objetivo de abordar de forma general los inicios del modelo económico actual para, posteriormente, examinar las condiciones, sobre todo internacionales, que obligan a replantearnos el cómo está estructurada la dinámica económica para, con base en información histórica, presentar los desafíos que se enfrentan en esta materia. Para esto, se analiza detalladamente la estructura de la cuenta corriente, así como de la balanza comercial. Después, se inspeccionan los componentes de la inversión extranjera directa para, por último, presentar las conclusiones. 
+
+El estudios histórico estará complementado con series de tiempo de distintas variables tomadas del \citeauthor{banxico} (Banxico) sobre la balanza de pagos, del \citeauthor{inegi} (INEGI) sobre los componentes de la balanza comercial y, en algunos casos, del \citeauthor{bm} para extraer las cifras del Producto Interno Bruto (PIB). Todas las cifras estarán expresadas en dólares corrientes.
+
+\pagebreak
+\section{Modelo económico}
+\sloppy
+
+En nuestros días se presenta la discusión acerca de los impactos del panorama internacional en la economía nacional, lo que nos obliga a adentrarnos en el análisis de lo que ha sido, lo que pensamos que es y, con un amplio margen a equivocarnos, estimar el camino que seguirá en los próximos años. Ante la sucesión de la nueva administración pública la pregunta se mantiene en torno al camino que seguirá la economía nacional ante las inevitables y necesarias relaciones comerciales, políticas y económicas con el exterior.
+
+En la actualidad se discuten los resultados conseguidos y no alcanzados del modelo económico actual, aunque en muchos de los casos las respuestas son evidentes: desde la década de los ochenta se han incrementado diversos indicadores que reflejan el desempeño económico, la expansión sin precedentes de las relaciones comerciales y de la inversión, entre otros. Es por esto que es necesario analizar en qué contexto y qué condiciones favorecieron la transición del modelo económico para, posteriormente, poder esbozar los desafíos que enfrenta la economía nacional en un contexto de reconfiguración de la cual podría beneficiarse.
+
+\subsection{Transición}
+
+La economía mexicana en nuestros días enfrenta las consecuencias de la apertura comercial que inició en la década de 1980 como resultado de la crisis de la deuda iniciada en México y que se expandió a gran parte de Latinoamérica. Las causas de esta, un común denominador también para los países de la región, como lo menciona \cite{marichal}, fueron los extensos y reiterados financiamientos obtenidos ---destinados para seguir estimulando tasas de crecimiento económico efímeros y financiar los gastos gubernamentales--- que después del periodo de política monetaria restrictiva en Estados Unidos entre 1980 y 1982\footnote{Como consecuencia de un periodo inflacionario en la economía norteamericana, el presidente de la Reserva Federal, Paul Volcker, encaminó una política monetaria ortodoxa. Como un resultado no previsto, contribuyó con los desajustes en las economías de la región.} ocasionó un severo aumento en las obligaciones financieras que tenían que saldarse. 
+
+Aunado a la insuficiencia de ingresos públicos, principalmente por concepto de las exportaciones petroleras, las causas de una crisis económica estaban a la vista. Para agosto de 1982 el Secretario de Hacienda, Jesús Silva Herzog, declaró que el gobierno federal se encontraba en la situación de suspender los pagos de la deuda externa, dando inicio a un sexenio recordado por un \textit{crecimiento económico nulo} a los que se sumaron la fuga de capitales y, ante la declaratoria de prestatario insolvente, el acceso al crédito en los mercados internacionales se restringió. En consecuencia, se presentaron serios impactos en el empleo, la inversión y el Producto Interno Bruto (PIB). Inevitablemente, el gobierno mexicano se encaminó a implementar lo que se conoce como las reformas estructurales en la administración del presidente Miguel De La Madrid.
+
+Esta serie de reformas, necesarias para obtener los paquetes de ayuda financiera por parte del Fondo Monetario Internacional (FMI) que intentó apaciguar el nerviosismo generalizado de los mercados\footnote{A la situación ya delicada, se sumó el decreto de nacionalización de la banca en septiembre de 1982.}, solicitaban una reestructuración económica y, desde luego, un replanteamiento de la relación entre el Estado y la economía que en la época tenía una amplia discusión. Se argumentaba por una liberalización de la economía, es decir, una reducción de la participación del gobierno en el sistema de mercado. De esta forma, se intentó reducir el tamaño gubernamental para, de esta manera, deshacerse de las responsabilidades que durante décadas previas había respondido y atendido. La transición de una economía \textit{mixta} a una de \textit{mercado} caracterizó a la década de 1980.
+
+Las políticas económicas de liberalización emprendidas, como lo menciona \cite{neoli_b} comenzaron, primero, en Reino Unido con Margaret Thatcher y, después, en los Estados Unidos con Ronald Reagan para posteriormente expandirse por todo el mundo. Las características de esta liberalización, en el caso mexicano, tendieron a la venta de las empresas estatales, reducir el déficit fiscal, apertura comercial, entre otros, con la finalidad de cambiar la forma en cómo el sistema económico operaba. 
+
+Después de una primera serie de reformas estructurales, el conjunto de la economía nacional pareció no mejorar porque un periodo de estanflación se presentó: hiperinflación sumado a una recesión sin precedentes. También, el poder adquisitivo de la moneda fue perdiendo valor, el empleo cayó y el acceso al crédito ---aunque no fuese destinado a la inversión productiva--- se condicionó a las expectativas de nuevas reformas macroeconómicas que encaminaran a la restauración del pago de las obligaciones contraídas por el gobierno. En suma, de nuevo fueron ineludibles otra ronda de ajustes en materia de política económica que proporcionaran una alternativa de modelo de desarrollo.
+
+En 1989, después de una amplia discusión sobre los acontecimientos provocados por la crisis de la deuda en Latinoamérica, desde Washington, Estados Unidos, se formularon una serie de propuestas encaminadas a impulsar el crecimiento económico de la región. Estas propuestas tenían como objetivo establecer la dirección adecuada que habría de seguirse para modificar los sistemas económicos y políticos en materia de apertura económica que transformaran positivamente las relaciones comerciales entre países desarrollados y en vías de desarrollo, así como una disciplina macroeconómica orientada a equilibrar las finanzas públicas de los países (\citeauthor{consen}, 2012). 
+
+Posteriormente a esta serie de reformas emprendidas y, desde luego, propuestas a través del FMI como condición para poder acceder a los empréstitos tan necesarios, por ejemplo, por México, se le conoce hasta nuestros días como el Consenso de Washington\footnote{De acuerdo con \citeauthor{consen} (2012) el economista John Williamson fue el encargado de formular estas políticas económicas en donde diversos economistas consensuaron su asertividad y necesaria ejecución.}. Estas abarcaron diversos ámbitos (\citeauthor{consen}, 2012, p. 46-48):
+\begin{spacing}{0.1}
+  \begin{enumerate}
+    \item \textit{Disciplina fiscal} evitando déficits recurrentes.  
+    \item \textit{Reordenamiento de las prioridades del gasto público} originando recortes en el mismo.
+    \item \textit{Reforma fiscal} encaminada a aumentar los ingresos tributarios.
+    \item \textit{Liberalización financiera} mediante la liberalización de los tipos de interés, a su vez que estos siempre sen positivos para la atracción de inversión.
+    \item \textit{Tipo de cambio competitivo} esencial para un crecimiento basado en las exportaciones.
+    \item \textit{Liberalización del comercio} por medio de la eliminación de las restricciones arancelarias y no arancelarias.
+    \item \textit{Liberalización de la inversión extranjera directa} como una opción para sustituir la inversión pública. 
+    \item \textit{Privatizaciones de empresas paraestatales} con la finalidad de liberar una gran cantidad de recursos para asignarlos a la atención social.
+    \item \textit{Desregulación} para atraer empresas extranjeras.
+    \item \textit{Derechos de propiedad bien definidos} a través de un marco jurídico definido y sistemas de contabilidad y regulación eficientes. \\
+  \end{enumerate}
+\end{spacing}
+
+En este contexto, la firma del Tratado de Libre Comercio (TLC) entre México, Estados Unidos y Canadá en 1993 incrementó los ánimos de la clase política mexicana por seguir un decálogo de políticas económicos que, entre los objetivos iniciales, enmarcaba la modernización de la economía nacional y la apertura en beneficio de la competitividad entre empresas nacionales y extranjeras. En otras palabras, se pasaba de un modelo de la sustitución de importaciones a uno en el que la actividad productiva se orientaba a la exportación como medio para conseguir el tan anhelado crecimiento económico. De igual forma, se comenzó a difundir la idea de que el mercado era el mejor mecanismo para asignar los recursos mediante el sistema de precios, en consecuencia el tamaño del Estado tendría que reducirse progresivamente.
+
+Es necesario mencionar que los debates, provenientes desde la teoría y la práctica económica, se dividían en dos claros y, en ciertos puntos, contrarios caminos: por un lado, los economistas que ---en muchos países se volvieron los asesores en la materia del aparato político--- afirmaban que las economías en las que el mercado era lo más libre y desregulada posible tendía a conseguir el éxito en términos económicos; por el otro, la economía planificada, a través de la intervención en todo momento del gobierno, era la vía más acertada\footnote{Esta amplia discusión se traduce a la economía capitalista y a la socialista o comunista, en donde Estados Unidos y la Unión de Repúblicas Socialistas Soviétivas eran los máximos representantes, respectivamente.}. Posteriormente, con la caída del Muro de Berlín, el primer modelo económico terminó por ser el hegemónico y comenzó a expandirse alrededor del mundo.
+
+Con base en los anterior, las amplias y consideradas necesarias medidas de ajuste por medio de lo formulado en el Consenso de Washington dieron inicio a una serie de reformas en política económica liberales. Pero, dado que comenzaron después de un periodo marcado por el proteccionismo de sistemas económicos mixtos, se le denominó como \textit{neoliberalismo}. En los inicios de este cambio hacia un modelo alternativo de desarrollo económico mexicano las posturas indicaban, como lo menciona \cite{jose_r}:
+\begin{adjustwidth}{1.2cm}{0cm}
+{\small que México entraría a una fase de desarrollo acelerado en la cual, por los incrementos en la productividad generados mediante la apertura comercial, se elevaría la eficiencia productiva, se estimularían las inversiones y crecería tanto el empleo como los salarios (p. 20).}
+\end{adjustwidth}
+
+Sin embargo, estos aspectos de mejora que se consideraron en aquella época aún en nuestros días los seguimos esperando. Por su parte, es cierto que la inversión ha crecido constantemente, la apertura comercial se demuestra por el constante y marcada tendencia a incrementar, sumado a que las tasas de crecimiento, aunque no han sido las mejores, por lo menos se han mantenido a partir del año 2000. 
+
+\subsection{Reversión de la producción fragmentada}
+
+Al igual que en la década de los noventa inició la transición hacia el modelo económico mundial, el avance de una economía global caracterizado por las pocas restricciones a las inversiones, el fomento del comercio, la libre movilidad de los factores productivos ---aunado a la integración de las sociedades, la política, los movimientos migratorios y de la tecnología--- comenzó una etapa que generalmente se le ha denominado como \textit{globalización}. Es un sentido amplio el \textit{neoliberalismo} es la característica económica de dicho proceso, a la cual se agregan factores políticos, culturales y de diversa índole que integran, o tienden a hacerlo, la relación entre los países.
+
+En el ámbito económico, la globalización permitió y aceleró el crecimiento de las empresas transnacionales que, desde su país de origen o matriz ---en su mayoría de países desarrollados---, trasladaron total o parcialmente su proceso productivo a distintas partes del mundo con la finalidad de abaratar los costos asociados a los salarios y aprovechando el marco institucional que les concedió ciertos beneficios. A través de la estructuración de las cadenas globales de producción, en conjunto con las cadenas globales de suministros, se creó una gran infraestructura distribuida al rededor del mundo con la finalidad de dividir ingeniosamente la fabricación de distintos tipos de bienes (Garrido, \citeyear{ga}). Esto dio paso a lo que se conoce como producción fragmentada o, de otra forma, como \textit{offshoring} en donde, como lo menciona \cite{ga}, se identifican tres grandes regiones: la fábrica de Asia, Europa y América del Norte que "en conjunto determinan la dinámica global" (p. 10).
+
+De la misma manera, esta red interconectada y con presencia a nivel mundial tiene la posibilidad, tomando como ejemplo la fabricación de un teléfono celular, de requerir suministros como "aluminio extraído en África, silicio producido en Sudamérica y microchips fabricados en Asia" y "es posible que se haya diseñado en América del Norte y ensamblado en una fábrica de Asia antes de enviarse mediante una empresa naviera europea" (\citeauthor{cer}, 2022, p. 54). Un proceso largo y con cientos de kilómetros de distancia entre los suministros, la línea de manufacturación y la compra por el consumidor final. Ante un desajuste o interrupción en alguna de las cadenas las pérdidas pueden ser cuantiosas.
+
+Esta dinámica global en las relaciones de producción ha sufrido diversas disrupciones provocadas por la gran recesión de 2008 y, recientemente, por la Pandemia de Covid-19 en 2020. De la misma manera, se han profundizado de forma severa, principalmente los problemas en la gestión de los suministros, como consecuencia de los conflictos entre países como la guerra de Rusia en Ucrania en 2022 y los conflictos en Medio Oriente desde 2023. Además, para contribuir con este panorama incierto internacional, las tensiones diplomáticas ---trasladadas al ámbito de una \textit{cuasi} guerra comercial--- entre Estados Unidos y China por la posible amenaza al territorio de Taiwan, contribuyen a una reconfiguración del sistema económico global.
+
+Con base en lo anterior, y con una importancia fundamental en lo acontecido en 2020, la tendencia a una reversión de la producción fragmentada geográficamente ha comenzado por acercar los procesos productivos a los países matrices por medio de sus empresas transnacionales, conocido como \textit{nearshoring}; también, como una medida drástica, regresar completamente a los países de origen el proceso de fabricación de estas empresas líderes en sus mercados (\textit{reshoring}) (Garrido, \citeyear{ga}). 
+
+México, en su relación de vecindad con Estados Unidos, es un territorio que ofrece atractivos incentivos en este proceso de reconfiguración en las cadenas globales de suministros y producción para atraer inversiones extranjeras destinadas a acercar los bienes de consumo final\footnote{Los Megaproyectos inciados en la administración del expresidente Andrés Manuel López Obrador, Tren Maya y el Interoceánico, podrán contrinuir significativamente en la logística necesaria.} a, desde luego, los consumidores mexicanos, y también al amplio mercado estadounidense, además de servir como centro de traslado a los mercados de centro y el sur del contiene americano.
+
+\pagebreak
+\section{Análisis histórico del comercio exterior mexicano}
+
+Las relaciones comerciales entre los países son inevitables en tanto que también son necesarias. En algunos casos, estas relaciones pueden estar estrechamente vinculadas con el desempeño económico de los países relacionados. En el caso de México, y considerando la cercanía geográfica, es Estados Unidos el socio comercial más destacado analizando el periodo \textit{neoliberal} desde 1980 hasta la actualidad. Asimismo, las políticas económicas en materia monetaria, fiscal y, principalmente, comercial, tienden a incentivar o desacelerar los intercambios bilaterales.
+
+En las próximas dos secciones se abordará con detalle los movimientos en las balanzas que conforman la cuenta corriente de la balanza de pagos. Después, se observará la tendencia que ha tenido la economía nacional para convertirse en una economía exportadora y, con base en datos, se presentarán a los principales socios comerciales.
+
+\subsection{Comportamiento de la Cuenta Corriente}
+
+El comportamiento de la cuenta corriente mexicana refleja la situación de la economía nacional y, en algunos aspectos, la situación social derivado de los movimientos migratorios. Como se puede observar en la Figura \ref{fig1}, la balanza de ingreso secundario ha presentado incrementos sostenidos hasta posicionarse, en 2023, en superávit con la extraordinaria cifra de 63 mil 183 millones de dólares (mdd) por concepto de remesas que envían los trabajadores, principalmente en la economía norteamericana, a sus familias en territorio nacional. Por el contrario, la balanza de ingreso primario, que contabiliza la entrada o salida de divisas por concepto de las actividades de los factores productivos, es la que más salidas de divisas representa por concepto del pago de intereses y utilidades que para el 2023 fue de 43 mil 693 mdd. 
+
+Por su parte, la balanza de servicios desde 1980 ha mantenido una tendencia paulatina a presentar déficit derivado de los servicios en el que se puede observar que el año pasado acumuló un déficit de 19 mil 417 mdd. La balanza comercial ---de la cual los movimientos que manifiesta son los más parecidos a los de la cuenta corriente (Véase Figura \ref{fig2})--- en 2023 presentó un déficit moderado de 5 mil 548 mdd.
+
+% Figura: CC
+\begin{figure}[H]
+  \caption{Comportamiento de la cuenta corriente \\ \small{Miles de millones de dólares}}
+  \centering
+<<echo=FALSE, warning=F, fig=TRUE, width=10, height=5>>=
+shade1 <- data.frame(x1 = c(as.Date("1982-01-01"), as.Date("1994-01-01"), 
+                           as.Date("2007-01-01"), as.Date("2019-01-01")),
+                    x2 = c(as.Date("1984-01-01"), as.Date("1996-01-01"),
+                           as.Date("2009-01-01"), as.Date("2021-01-01")),
+                    min = c(-Inf, -Inf, -Inf, -Inf), max = c(Inf, Inf, Inf, Inf))
+# Recodificar los valores de la variable:
+s_cc <- s_cc%>%mutate(var=recode(variable,
+  "b_c"="Balanza comercial",
+  "b_s"="Balanza de servicios",
+  "b_ip"="Balanza ingreso primario",
+  "b_is"="Balanza ingreso secundario"
+))
+
+s_cc %>% filter(año<"2024-01-01") %>%
+  ggplot()+
+  geom_line(aes(x=año,y=valores, color = var), size=0.8)+theme_light()+
+  labs(x="",y="")+
+  theme(legend.position = "bottom",
+        panel.grid.major = element_line(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        legend.title = element_blank(),
+        legend.text=element_text(size = 14),
+        axis.text.x = element_text(size = 12),  # Tamaño de etiqueta del eje X
+        axis.text.y = element_text(size = 12)   # Tamaño de etiqueta del eje y
+        )+
+  scale_y_continuous(position = "right")+
+  geom_hline(yintercept = 0,linewidth=0.1, color = "black")+
+  geom_rect(data=shade1,mapping=aes(xmin = x1, xmax = x2, ymin = min, ymax = max),
+            fill = "grey", alpha = 1/4)+
+  guides(color = guide_legend(ncol = 2))  # Cambiar el número de columnas en la leyenda
+@
+  \label{fig1}
+    \begin{minipage}{0.8\textwidth}
+      \footnotesize
+      \textup{Fuente:} Elaboración propia con datos del SIE, Banxico. Saldos acumulados anuales.\\ Nota: Las sombras indican las crisis económicas de 1982, 1994, 2008 y 2020.
+    \end{minipage}
+\end{figure}
+
+En periodos marcados por crisis económicas en México, el comportamiento de las balanzas de las cuentas corriente expresan los ajustes que se viven por desaceleraciones económicas y/o recesiones posteriores que impactan en las relaciones comerciales, el envío de remesas y el aumento del pago de la deuda. Como ejemplos, se observa que en la \textit{crisis de la deuda} en 1982, el \textit{error de diciembre} en 1994, la \textit{gran recesión} de 2008 y el confinamiento provocado por la \textit{Pandemia de Covid-19} en 2020, provocó severos y evidentes ajustes. 
+
+Por su parte, los saldos en la cuenta corriente pueden expresar, de acuerdo con \cite{kozi}, la demanda de ahorro externo del conjunto de una economía en donde lo adecuado, tomando en cuenta la constante tendencia a presentar déficits, es que no represente más del 3 por ciento con relación al PIB. Para el caso de México, como se puede observar en la Figura \ref{fig2}, ha sido una crónica inclinación al déficit desde 1988 hasta 2019, en donde se puede ubicar el déficit mayor al 3 por ciento en 1993, es decir, la demanda de ahorro externo para financiar el consumo a través de las importaciones en algunos años ha presentado cifras preocupantes que requirieron medidas de ajuste. 
+
+Los saldos en la cuenta corriente que ha presentado la economía nacional están estrechamente relacionados con el ciclo económico: ante una contracción de la actividad económica, como, por ejemplo en 1983 y en 1987, el saldo tiende a presentar un superávit; por el contrario, ante desempeños favorables de la actividad económica el saldo mayoritariamente ha sido deficitario. En algunos periodos de crisis, como en 1995 y 2009, el déficit se ha reducido. De igual forma, el caso más representativo fue en el 2020, cuando las consecuencias del confinamiento ocasionados por la Pandemia contrajeron el PIB por más del 8 por ciento, lo cual presentó el atípico superávit de más del 2 por ciento.
+
+% Saldo de la CC como % del PIB
+\begin{figure}[H]
+  \caption{Saldo de la cuenta corriente como porcentaje del PIB}
+  \centering
+<<echo=FALSE, warning=F, fig=TRUE, width=8, height=3>>=
+pib <- read_xlsx("pib_banco_mundial.xlsx", sheet = 1)%>% filter(año>"1979")
+s_0 <- read.csv("Balanza_P_1980-2024.csv",skip=17) %>% select(Fecha, c_corriente) %>% 
+  filter(Fecha!="01/01/2024" & Fecha !="01/04/2024")
+s_0$Fecha <-  as.Date(s_0$Fecha, format="%d/%m/%Y")
+
+
+s_0 <- s_0 %>%
+  mutate(año = year(Fecha)) #Transformar los trimestres a años
+s_0 <- s_0 %>% select(-Fecha) %>% group_by(año) %>% 
+  summarise(across(everything(),sum))
+
+def <- merge(pib,s_0, by="año")
+def <- def %>% mutate(pibm=pib/1000000)%>%
+  mutate(deficit=c_corriente/pibm*100) 
+
+ggplot()+geom_line(data=def,aes(x=año, y=deficit), size=0.4, color="orchid")+
+  theme_light()+
+  labs(x="",y="") + geom_hline(yintercept = 0,linewidth=0.1, color = "black")+
+  theme(axis.text.x = element_text(size = 12),
+        axis.text.y=element_text(size=12),
+        panel.grid.major = element_line(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()
+        )+
+  scale_y_continuous(position = "right")
+@
+  \label{fig2}
+    \begin{minipage}{0.8\textwidth}
+      \footnotesize
+      \textup{Fuente:} Elaboración propia con datos del SIE, Banxico y Banco Mundial.
+    \end{minipage}
+\end{figure}
+
+Los saldos en la cuenta corriente que ha presentado la economía nacional están estrechamente relacionados con el ciclo económico: ante una contracción de la actividad económica, como, por ejemplo en 1983 y en 1987, el saldo tiende a presentar un superávit; por el contrario, ante desempeños favorables de la actividad económica el saldo mayoritariamente ha sido deficitario. En algunos periodos de crisis, como en 1995 y 2009, el déficit se ha reducido. De igual forma, el caso más representativo fue en el 2020, cuando las consecuencias del confinamiento ocasionados por la Pandemia contrajeron el PIB por más del 8 por ciento, lo cual presentó el atípico superávit de más del 2 por ciento.
+
+En suma, se puede examinar que el crédito derivado de la entrada de remesas de los trabajadores fuera de México registrados en el ingreso secundario compensa, aunque no del todo, los débitos que presentan la balanza comercial, de servicios y de ingreso primario. En este sentido, y reforzando el argumento sobre la estrecha relación de la economía nacional con la estadounidense, el fortalecimiento del mercado laboral de la población latina en Estados Unidos tiene serias repercusiones en el envío de remesas que, al final de cuentas, representan recursos transferidos a las familias en México que fortalecen el consumo.  
+
+\subsection{Balanza comercial}
+
+La balanza comercial mexicana refleja una clara tendencia a incrementar a lo largo del tiempo. A partir de la entrada en vigor del TLC, en 1994, la tendencia ascendente de las exportaciones e importaciones mexicanas se ha expandido como nunca antes, como se muestra en la Figura \ref{fig3}. El ritmo de crecimiento anual de los bienes exportados ha sido del 7.9 por ciento mientras que el de los bienes comprados del exterior ha sido del 7 por ciento. 
+
+Es importante destacar que el dinamismo del comercio mexicano tiene una fuerte influencia con la economía estadounidense, por lo que una disminución en la actividad económica de ambos países se ve reflejada en un descenso de la demanda de las exportaciones mexicanas, una disminución de las importaciones y también una desaceleración en los bienes exportados. Sin embargo, lo que más destaca en los periodos marcados por recesiones es que las importaciones son las que mayor descenso muestran en los periodos de crisis económicas, lo que contribuye a que el déficit se reduzca o, en el mejor de los casos, se presente un superávit comercial (Figura \ref{fig3}).
+
+%Figura: Balanza comercial
+\begin{figure}[H]
+  \caption{Comercio agregado \\ \small{Miles de millones de dólares}}
+  \centering
+<<echo=FALSE, warning=F, fig=TRUE,width=10, height=4>>=
+#Transformar a formato largo las exportaciones e importaciones:
+s_l <- s %>% select(año,x,m) %>% pivot_longer(cols=c(x,m), values_to = "valores", names_to = "var") 
+
+s_l <- s_l%>% mutate(v=recode(var,
+  "x"="Exportaciones", 
+  "m"= "Importaciones")) %>% filter(año<"2024-01-01")
+
+ggplot()+geom_line(data=s_l,aes(x=año, y=valores, color=v), size=0.8)+
+  geom_rect(data=shade1, mapping=aes(xmin = x1, xmax = x2, ymin = min, ymax = max),
+            fill = "grey", alpha = 1/4)+
+  theme_light()+
+  labs(x="",y="")+
+  scale_y_continuous(labels = label_number(), position = "right")+
+  theme(#legend.position = "bottom",
+        legend.position = c(0.1,0.85),
+        legend.background = element_rect(color = "azure4"),
+        legend.text = element_text(size = 13),
+        legend.title = element_blank(),
+        panel.grid.major = element_line(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.text.x = element_text(size = 12),
+        axis.text.y=element_text(size=11))
+@
+    \label{fig3}
+    \begin{minipage}{0.8\textwidth}
+      \footnotesize
+      \textup{Fuente:} Elaboración propia con datos del SIE, Banxico. Saldos acumulados anuales. \\ Nota: Las sombras indican las crisis económicas de 1982, 1994, 2008 y 2020.
+    \end{minipage}
+\end{figure}
+
+Asimismo, los estrechos vínculos que tiene la economía de Estados Unidos en materia comercial con México son fundamentales, como se observa en la Figura \ref{fig4_a}: en 2023, el 82.6 por ciento de las exportaciones tuvieron como destino la economía norteamericana; 13.7 a otro destino del mundo; el 3 por ciento a Canadá y el 1.7 por ciento a China. Por su parte, las importaciones presentaron un comportamiento distinto: el 42.6 por ciento tuvo una procedencia de Estados Unidos; el 36 por ciento de otra parte del mundo; 19.1 de China y 2.2 por ciento de Canadá.
+
+Con base en lo anterior, la presencia de la economía norteamericana es indiscutible. Sin embargo, en los años recientes ha crecido el valor de los bienes procedentes desde China, con una amplia superioridad en comparación con Canadá que representa una mínima fracción. Ante un panorama actual de proteccionismo y una mayor presencia mundial china, las declaraciones de los políticos norteamericanos  ---aludiendo a una triangulación de bienes chinos que entran a México y después se exportan a Estados Unidos--- tienen sustento\footnote{Véase: Amador, O. y González, L. (19 de febrero de 2024). "EU recrimina a México por supuesta triangulación de acero y aluminio". \textit{El Economista}.}. Esto ha ocasionado que el mayor socio comercial influya en las decisiones de la política comercial mexicana y, de igual forma, por medio de diferentes mecanismos, condicione su actuar\footnote{Atendiendo también el desplazamiento de que han sufrido algunos sectores de la industria nacional, se han aplicado aranceles a ciento de productos, principalmente de origen chino. Véase: Redacción. (23 de abril de 2024). "Aumenta México aranceles temporales, entre 5\% y 50\%, a China y países sin tratado comercial". \textit{Aristegui Noticias}.}.
+
+En cambio, la composición de las exportaciones e importaciones por tipo de bienes comercializados es, de acuerdo con la Figura \ref{fig4_b}, notable. En el caso de las importaciones se puede apreciar una tendencia a la adquisición de bienes intermedios, lo que se ha expandido desde la década de los noventa: tan solo el año pasado el 75.7 por ciento fueron bienes intermedios, 14.7 de consumo y 9.6 por ciento bienes de capital. Por el contrario, las exportaciones tienen una distribución más homogénea: 42.9 por ciento bienes intermedios, 31.8 de capital y 25.2 por ciento de bienes de consumo.
+
+%%Subfigura
+\begin{figure}[H]
+  \caption{Composición de las relaciones comerciales mexicanas}
+  \begin{subfigure}{1.1\textwidth}
+  \caption{Por destino y procedencia \\ \small{Miles de millones de dólares}}
+  \centering
+<<echo=FALSE, warning=F, fig=TRUE,width=10, height=4>>=
+#===== Exportaciones
+g5 <- x_l%>% group_by(año,p) %>% summarise(valores=sum(valores))%>%
+  ggplot()+
+  geom_bar(aes(x=año, y=valores, fill=p), stat="identity", alpha=1/2)+theme_classic()+
+  labs(x="",y="", subtitle="Destino de las Exportaciones")+scale_y_continuous(position = "right")+
+  theme(legend.position = c(0.2,0.8),
+        legend.title = element_blank(),
+        panel.grid.major = element_line(),
+        legend.background = element_rect(color = "azure4"),
+        legend.text = element_text(size = 12),
+        axis.text.y = element_blank(),  # Quitar etiquetas del eje Y
+        axis.ticks.y = element_blank(),  # Quitar marcas del eje Y
+        axis.title.y = element_blank(),  # Quitar título del eje Y
+        axis.line.y = element_blank(), #Quitar la línea del eje Y
+        axis.text.x = element_text(size=12),
+        plot.subtitle=element_text(size=13)) +
+  coord_cartesian(ylim = c(0, 605))
+#===== Importaciones:
+g6<- m_l %>% group_by(año,p) %>% summarise(valores=sum(valores)) %>%
+  ggplot()+
+  geom_bar(aes(x=año, y=valores, fill=p), stat="identity", alpha=1/2)+
+  theme_classic()+
+  labs(x="",y="", subtitle="Procedencia de las Importaciones")+
+  scale_y_continuous(position = "right")+
+  theme(legend.position = "none",
+        legend.title = element_blank(),
+        panel.grid.major = element_line(),
+        legend.background = element_rect(color = "azure4"),
+        legend.text = element_text(size = 11),
+        axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size=12),
+        plot.subtitle=element_text(size=13))
+patchwork::wrap_plots(g5,g6,nrow=1)
+@
+    \label{fig4_a}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}{1.1\textwidth}
+  \caption{Por tipo de bienes \\ \small{Miles de millones de dólares}}
+  \centering
+<<echo=FALSE, warning=F, fig=TRUE,width=10, height=4>>=
+#Primera gráfica: Exportaciones:
+g7 <- s2_l%>%filter(año<"2024-01-01") %>%
+  ggplot()+geom_bar(aes(x=año, y=valores, fill=Tipo),stat="identity", alpha=1/2)+
+  labs(title="Exportaciones",
+       x="", y="")+
+  theme_classic()+scale_y_continuous(labels = label_number(), position = "right")+
+  theme(legend.position = c(0.2,0.8),
+        legend.title = element_blank(),
+        panel.grid.major = element_line(),
+        legend.background = element_rect(color = "azure4"),
+        legend.text = element_text(size = 12),
+        axis.text.y = element_blank(),  # Quitar etiquetas del eje Y
+        axis.ticks.y = element_blank(),  # Quitar marcas del eje Y
+        axis.title.y = element_blank(),  # Quitar título del eje Y
+        axis.line.y = element_blank(), #Quitar la línea del eje Y
+        axis.text.x = element_text(size = 12) #Tamaño del eje X
+        )+
+   coord_cartesian(ylim = c(0, 605))
+# Segunda Gráfica: Importaciones:
+g8 <- s3_l %>% filter(año<"2024-01-01") %>%
+  ggplot()+geom_bar(aes(x=año, y=valores, fill=Tipo),stat="identity", alpha=1/2)+
+  labs(title="Importaciones",
+       x="", y="")+
+  theme_classic()+scale_y_continuous(labels = label_number(), position = "right")+
+  theme(legend.position = "none",
+        legend.title = element_blank(),
+        panel.grid.major = element_line(),
+        axis.text.x = element_text(size = 12),  # Tamaño de etiqueta del eje X
+        axis.text.y = element_text(size = 12)   # Tamaño de etiqueta del eje y
+        )
+patchwork::wrap_plots(g7,g8,nrow=1)
+@
+    \begin{minipage}{0.8\textwidth}
+      \footnotesize
+      \textup{Fuente:} Elaboración propia con datos del BIE, INEGI; SIE, Banxico. \\ Nota: Para el caso \ref{fig4_a} los datos son a partir de 1993. 
+    \end{minipage}
+    \label{fig4_b}
+  \end{subfigure}
+  \label{fig4}
+\end{figure}
+  
+
+La tendencia de la economía mexicana a exportar e importar derivado del TLC a partir de 1994 ha sido evidente. El grado de apertura comercial se mide a través de la suma de las exportaciones e importaciones con respecto al PIB nacional (\citeauthor{ar}, 2017). Como se aprecia en la Tabla \ref{t1}, desde 1995 hasta el 2020 la apertura comercial de nuestro país ha avanzado aceleradamente al pasar del 12.4\% en 1990 hasta posicionarse en cerca del 70 por ciento con respecto al valor total de la producción en 2020. 
+
+\begin{table}[H]
+  \centering
+  \caption{Grado de apertura comercial de México por lustro}
+  \label{t1}
+  \begin{tabular}{l|ccccccc}
+    \hline
+    Apertura & 1990 & 1995 & 2000 & 2005 & 2010 & 2015 & 2020\\
+    \hline
+    $\frac{X+M}{PIB}$ & 12.4\% & 21\% & 36\% & 43.5\% & 56.3\% & 65\% & 68.5\%\\
+    \hline
+  \end{tabular} 
+  \\
+  \begin{minipage}{0.8\textwidth}
+  \footnotesize
+  \textup{Fuente:} Elaboración propia con datos del SIE, Banxico; \citeauthor{bm}. 
+  \end{minipage}
+\end{table}
+
+Por último, es necesario reconocer que, debido a que la tendencia de las importaciones nacionales indican que se componen por bienes intermedios, la economía nacional juega un papel no menos importante en la cadena global de suministros porque observando también la composición de las exportaciones por tipo de bien se identifica que cerca de la mitad siguen siendo bienes intermedios. Solo una cuarta parte de los bienes vendidos al exterior son productos de consumo final, mientras que en el caso de los bienes comprados estos representan cerca de una sexta parte del total. En suma, en los próximos años y con la reversión de la proclividad a la producción fragmentada, estas condiciones podrán cambiar o profundizarse.
+
+\pagebreak
+\section{Desajustes globales}
+
+Como una consecuencia esperada y ampliamente aceptada de la apertura económica y comercial ---incluso en nuestros días se observa con una mirada esperanzadora--- se han presentado los cuantiosos flujos de inversión, principalmente directa con la consecuente creación de activos productivos, que han entrado a México en distintas industrias nacionales. En algunos sectores la inversión se ha restringido por considerarlos, desde el gobierno en turno, estratégicos para el desarrollo nacional, como en el sector energético. Sin embargo, estos flujos corresponden a la dinámica global requerida en la relación entre los países que de cierta forma han condicionado la estructura del modelo económico nacional.  
+
+En la configuración de la economía global, como se mencionó en la sección primera, se identifican tres grandes regiones como consecuencia del potencial industrial en donde los países centrales han sido Estados Unidos, Alemania y Japón-China de los cuales, por medio del \textit{offshoring}, trasladaron total o parcialmente el proceso de fabricación de los bienes de consumo final a distintas regiones del mundo con el objetivo de abaratar los costos de producción. En consecuencia, la ``sustitución de producciones complejas en los países sede por producciones más simples en los países fábrica genera la desindustrialización de los primeros, en beneficio del empleo de insumos producidos en el exterior a menor costo'' (\citeauthor{ga}, 2022, p. 25). Debe de realizarse la especial mención a la región asiática porque se considera como la más beneficiada de la distribución geográfica de la producción por presentar los costos de producción más atractivos, destacando China por desempeñar el papel simultáneo de sede y fábrica.
+
+De esta forma, se articula una relación de las naciones \textit{sede} con los países \textit{fábrica}\footnote{Esta relación países sede--países fábrica concuerda, de acuerdo con la teoría crítica, con la relación necesaria y estructural del sistema económico entre los paises en desarrollados o industrializados con los en vías de desarrollo o poco industrializados. Solo lo que cambia es el enfoque.}, en donde los primeros destacan por concentrar los procesos de más alto valor involucrando tecnología avanzada e intensivos en capital, a su vez que son demandantes de trabajo calificado con remuneraciones elevadas; mientras los segundos desarrollan lo que se demanda desde los países sede en donde generalmente los costos asociados al capital humano son menores (\citeauthor{ga}, 2022). Estas regiones identificadas acrecentaron su grado de integración porque, a pesar de la distribución fragmentada al rededor del mundo con especial atención a lo que ha ofrecido Asia, se identifica claramente las ventajas en los tiempos de traslado que ofrece la cercanía geográfica materializado en los diversos tratados comerciales bilaterales y multilaterales entre países.
+
+Se habla, entonces, de una industrialización en las naciones fábrica en los procesos necesarios como proveedores, lo que ocasiona un aumento en la oferta de trabajo por parte de las industrias involucradas en la demandada de insumos. Por el contrario, se presenta una menor oferta de empleo que, en algunos países, ha desencadenado en cuestionamientos desde partes de la sociedad. Esto, por ejemplo, ha promovido que distintos países desarrollados implementen medidas al respecto enfatizadas a que la comercialización de los bienes finales contengan partes mínimas de insumos producidos en sus economías. Medidas que intentan proteger los sectores industriales que han sido desplazados.
+
+Las crisis recientes de la globalización comenzaron por exacerbar los cuestionamientos acerca de los beneficios obtenidos de este proceso. Desde 1994, como lo menciona \cite{marichal}, la crisis se expandió desde los mercados emergentes hacia el mundo desarrollado, lo que ocasionó que las objeciones iniciaran un largo camino. Después, con las consecuencias económicas de la gran recesión de 2008, comenzó a acelerarse la tendencia a la reversión de la producción fragmentada a nivel mundial con Estados Unidos como máximo representante. Fue en 2017 cuando, con la elección presidencial de Donald Trump, la economía norteamericana viró bruscamente en la dirección de políticas económicas proteccionistas ---con posibilidad de acrecentarse con la reelección del republicano en noviembre del presente año---. Para esto, las empresas estadounidenses, grandes y con presencia mundial, han sido objeto de influencias para dirigir sus futuras inversiones a su territorio para, de esta forma, alejarlas principalmente de Asia. Es así como se están presentando los cambios profundos en la globalización.
+
+Asimismo, la relación entre Estados Unidos y China ha presenciado cambios rotundos en dos ámbitos que contribuyen considerablemente en la reconfiguración global. Por un lado, las tensiones políticas tienen su origen en la expansión imperialista que China manifiesta en la relación con los países de su región. Con la posible anexión del territorio de Taiwan, la política ---también imperial--- norteamericana alude a la ayuda necesaria que le concedería al territorio taiwanés para su defensa. Por otro lado, los enfrentamientos en materia comercial, como consecuencia de la expansión de la presencia mundial China a través de sus empresas, ha amenazado diversos sectores industriales estadounidenses, lo que ha derivado en incrementos arancelarios y restricciones comerciales entre ambas partes. 
+
+Por si no fuera poco, la Pandemia de Covid-19 en 2020 ocasionó, primero, la interrupción de las actividades y, segundo, desencadenó recesiones en todo el mundo. De esta manera, 
+
+\begin{adjustwidth}{1.2cm}{0cm}
+{\small incrementó los impactos que se venían procesando en las cadenas globales de producción desde las crisis precedentes, intensificando el bloqueo en curso de distintas cadenas globales de suministros, lo que incentivó los procesos de relocalización de inversiones en distintas partes del planeta (\citeauthor{ga}, 2022, p. 35).}
+\end{adjustwidth}
+
+Por su parte, los conflictos más recientes a nivel mundial obligan la reconfiguración del sistema económico. Por un lado, la guerra de Rusia en Ucrania posiciona en una seria disputa a toda la Unión Europea por la amenaza creciente de que el conflicto ocasione ---además de una contracción en la oferta de materias primas--- una destrucción mayor, además de que se extienda a otros países. Por el otro, los enfrentamientos en Medio Oriente entre Israel y los grupos terroristas puede aumentar las tensiones hasta llegar a convertirse en un conflicto regional.
+
+A simple vista, estos conflictos afectan severamente el desempeño de las naciones en cuestión. Pero, en términos generales, estas colisiones directas e indirectas confirman que existen en la actualidad desajustes globales, incluso hasta llegar a esbozar que nos encaminamos a una \textit{desglobalización} marcada por una transición imperialista, proteccionista y de retórica nacionalista desde diversas partes del mundo. Con el crecimiento excepcional de economías emergentes de Asia, principalmente China, diversas naciones occidentales intentan imponer obstáculos ante una inevitable penetración en sus mercados internos\footnote{Desde la prohibición de redes sociales chinas en Estados Unidos argumentando emergencia de seguridad nacional, hasta aranceles de la Unión Europea a los automóviles eléctricos producidos por empresas chinas.}.
+
+\subsection{¿Nearshoring como alternativa?}
+
+Ante un panorama internacional de evidente incertidumbre, y considerando las relaciones estrechas entre México y Estados Unidos en materia política, social y económica, además de la cercanía geográfica, la economía nacional se enfrenta a un horizonte desafiante, al mismo tiempo que alentador. Los desajustes globales más recientes han ocasionado una tendencia a la reversión de la producción fragmentada, además de una relocalización de la misma a través de las inversiones futuras en países cercanos a las sedes. En consecuencia, nos encontramos inmersos en un proceso de nearshoring o, como medida drástica, de reshoring.
+
+Dado que México se encuentra sumamente vinculado a la fábrica de América del Norte, las tendencias actuales indican que las cadenas \textit{globales} pasarán a reestructurarse como \textit{regionales}, de las cuales la integración existente de México con Estados Unidos y Canadá puede profundizarse y, desde luego, crear vínculos mutuos de beneficios. Las futuras inversiones, en comparación del cómo se estructuraban antes, estarán dirigidas en menor medida a los países asiáticos para posicionarse, como se estima, en el continente americano. 
+
+Lo que debemos de destacar es la relevancia que tienen las inversiones empresariales norteamericanas en la economía nacional porque en algunos años ha rondado cerca de la mitad de la inversión extranjera directa total (Véase Figura \ref{fig5}), con menor participación la inversión directa de Alemania, Canadá, España y China. Durante el 2023 la procedencia de la inversión presentó un comportamiento típico: 37.9 \% provino de Estados Unidos, 10.4 \% de España, 9.6 \% de Canadá, 6.7 \% de Alemania y 35.4 \% de otros países del mundo. Es decir, 4 países son los que, a través de sus empresas transnacionales, proveen de endeudamiento neto a la economía nacional por cerca del las dos terceras partes de 36 mil 282 mdd el año pasado.
+
+\begin{figure}[H]
+  \caption{Procedencia de la Inversión extranjera directa \\ \small{Millones de dólares}}
+  \centering
+<<echo=FALSE, warning=F, fig=TRUE, width=9, height=5>>=
+ied_p %>% group_by(Fecha,p) %>% summarise(valores=sum(valores)) %>%
+  ggplot()+geom_bar(aes(x=Fecha, y=valores, fill=p), stat="identity", alpha=0.6)+
+  theme_bw()+labs(x="",y="")+
+  theme(legend.title = element_blank(),
+        legend.position = "bottom",
+        axis.text.x = element_text(size = 12),  # Tamaño de etiqueta del eje X
+        axis.text.y = element_text(size = 12),
+        legend.text = element_text(size = 14)
+        )+
+  scale_y_continuous(label=label_number(), position="right")+
+  scale_fill_brewer(palette = "Spectral")+
+  guides(color = guide_legend(ncol = 4))  # Cambiar el número de columnas en la leyenda
+@
+    \label{fig5}
+    \begin{minipage}{0.8\textwidth}
+      \footnotesize
+      \textup{Fuente:} Elaboración propia con datos del Registro Nacional de Inversiones Extranjeras, Secretaría de Economía. \\ Nota: Saldos acumulados anuales por país. En algunos años se presentaron desinversiones.
+    \end{minipage}
+\end{figure}
+
+Por su parte, la composición de la inversión extranjera directa, como se muestra en la Figura \ref{fig6}, nos revela interesantes puntos: se ha presentado una tendencia a que la inversión directa acumulada anual provengan de la reinversión de las utilidades conseguidas por las empresas transnacionales en nuestro país, lo que indica que las nuevas inversiones (de nuevas empresas) ha disminuido. Esto puede indicar dos cosas. Primero, que las condiciones actuales son tan atractivas para las empresas ya establecidas que optan por la reinversión de sus beneficios. Segundo, que las condiciones no son tan atractivas como para tentar a que nuevas firmas se posicionen en nuestro país.
+
+Salvo algunos años en los que se han presentado fusiones o compras empresariales (como en 2014), es impresionante examinar la cantidad que ha recibido la economía nacional por concepto de endeudamiento neto directo: hasta el primer semestre del año en curso la cantidad ascendió a 31 mil 96 mdd, inferior en apenas el 14.3 \% a lo presentado en todo el año anterior. Indudablemente, se está comenzando a presentar la relocalización de las inversiones.
+
+\begin{figure}[H]
+  \caption{Composición de la Inversión extranjera directa \\ \small{Millones de dólares}}
+  \centering
+<<echo=FALSE, warning=F, fig=TRUE,width=9, height=5>>=
+ied%>%ggplot()+geom_bar(aes(x=fecha, y=valores, fill=i), 
+                        stat="identity", alpha=0.8)+
+  theme_bw()+labs(x="",y="")+
+  theme(legend.position = "bottom",
+        legend.title = element_blank(),
+        axis.text.x = element_text(size = 12),  # Tamaño de etiqueta del eje X
+        axis.text.y = element_text(size = 12),
+        legend.text = element_text(size = 14))+
+  scale_fill_brewer(palette = "Pastel1")+
+  scale_y_continuous(labels = label_number(), position = "right")+
+  guides(color = guide_legend(ncol = 1))  # Cambiar el número de columnas en la leyenda
+#g9
+@
+    \label{fig6}
+    \begin{minipage}{0.8\textwidth}
+      \footnotesize
+      \textup{Fuente:} Elaboración propia con datos del Registro Nacional de Inversiones Extranjeras, Secretaría de Economía. \\ Nota: Los datos son a partir de 2006. 
+    \end{minipage}
+\end{figure}
+
+Sin embargo, este panorama alentador se observa interrumpido y, en mayor o menor medida, condicionado por las expectativas presentes y futuras de la inversión considerando variables políticas, sociales y económicas que toman en cuanta las empresas a la hora de planificar la financiación en activos fijos. Es evidente que, como lo menciona \cite{ze}, parafraseando lo que han afirmado recientemente los directivos empresariales, ``México se encuentra ante oportunidades de inversión no vistas en cuatro décadas'' (p. 26). Por lo que resulta necesario que el gobierno contribuya con un clima idóneo para que estas se materialicen.
+
+Como lo sostienen \cite{acr}, recientes galardonados con el Premio Nobel de Economía, la estructura de las instituciones políticas determinan el éxito económico de las naciones. Por lo que es necesario ---imperante para naciones en desarrollo--- que las instituciones, en conjunto con un marco constitucional de estado de derecho perfectamente delimitado, expresen sin aspavientos que la estructura política en conjunción con la económica posicionan a un país en un lugar de firme estabilidad que salvaguarde los intereses de los inversores establecidos y los potenciales\footnote{Como es bien sabido, la aprobación de la Reforma al Poder Judicial nacional desestabilizó considerablemente las expectativas de inversión hasta el punto de considerar inversiones \textit{congeladas}. Desde diversos nichos se argumenta que el sistema judicial se encamina a ocasionar un deterioro institucional.}.
+
+También, la situación en la que se encuentra la infraestructura, la calificación de la mano de obra, los incentivos fiscales, el estado de la distribución energética, entre otros (\citeauthor{ze}, 2024), son variables que están analizando las empresas en este proceso de nearshoring para posicionarse en México. Y, como resulta evidente, el papel que juegan las instituciones nacionales se encaminarán a facilitar las condiciones que sean necesarias para no desviar la atención de nuestro territorio.
+
+Por otro lado, en un futuro cercano las condiciones del modelo económico nacional podrían verse modificadas de una forma peculiar: la inversión directa podrá mantener la estructura del modelo económico actual, en el que México siga siendo, aunque a partir de ahora de forma más relevante, un jugador secundario con amplia participación en la cadena global y ,sobre todo, un actor principal en la cadena regional para suministrar de insumo necesarios a la nación sede, Estados Unidos. Esto representaría que, en esencia, la estructura económica siga subordinándose ---lo cual siempre ha sido--- y manteniéndose a importar y exportar bienes intermedios.
+
+\pagebreak
+\section{Conclusiones}
+\addcontentsline{toc}{section}{Conclusiones} % Para que no se enumere en el índice
+
+El modelo económico mexicano actual, como se revisó, comenzó con los problemas derivados de la crisis de la deuda externa. Desde la década de los ochenta, se puede apreciar una estrecha relación entre la economía norteamericana con la nacional que con el paso de los años ha ido incrementándose aceleradamente como consecuencia de la apertura comercial. El análisis de la composición del comercio nos indica que el principal socio comercial por destino y procedencia, así como por tipo de bienes cuantificado a través de las importaciones y exportaciones es indudablemente la economía estadounidense. 
+
+También, al estudiar los componentes de la cuenta corriente, podemos observar que los déficit presenciados tienen una relación negativa con el comportamiento de la economía en su conjuntos. En otras palabras, ante una disminución de la actividad económica, la demanda de ahorro externo se reduce principalmente por los resultados de la balanza comercial. La estructura económica nacional nos posiciona como importantes proveedores de insumo necesarios para los procesos productivos de las empresas norteamericanas, derivado de una relación estructural global entre países \textit{sede} y \textit{fábrica}.
+
+La expansión de la producción fragmentada ocasionada por la globalización ha comenzado con una tendencia a revertirse en los años recientes. Para ello, las crisis económicas, y más recientemente los conflictos y tensiones internacionales, han provocado un proceso de relocalización de las inversiones a nivel mundial en el cual algunas naciones se encaminan a implementar políticas económicas proteccionistas y, en algunas partes del mundo, a profundizar las relaciones regionales. Después de considerar la procedencia y la composición de la inversión extranjera directa, es difícil no hacer una especial comparación entre los ingresos por concepto de remesas y de inversión, en las cuales la segunda es aproximadamente la mitad de los recursos que envían los trabajadores mexicanos mayoritariamente desde la economía estadounidense.
+
+Considerando que el clima nacional para la atracción de las inversiones extranjeras debe estar sujeto a la estabilidad institucional, aunado a los requerimientos inherentes demandados por las actividades en las diferentes industrias, corresponderá al gobierno que las condiciones sean idóneas para que no se presente el proceso drástico de reshoring que emprendan las empresas transnacionales para regresar todo el proceso a las sedes. Para esto, será necesario que se implementen medidas de política económica orientadas, de igual forma, a incentivar un fortalecimiento industrial que no solo esté supeditado a los requerimientos de insumo de la región. De lo contrario, el nearshoring profundizará el rol que ha desempeñado la economía nacional en la estructura subordinada en la cadena de suministros global y, posiblemente, regional.
+
+Por último, sin importar cuál sea el camino en que derive el proceso de reconfiguración de las cadenas de suministro y producción en este proceso de nearshoring, el gobierno mexicano deberá velar por los intereses de los trabajadores al monitorear las condiciones laborales, la remuneración justa por sus labores; una mayor participación en los procesos que involucren alta tecnología e intensivos en capital; intensificar  los mecanismos de prevención de la evasión fiscal, y salvaguardar las condiciones ambientales. El arribo de las empresas en territorio nacional deberá sujetarse a lo que las instituciones establezcan y no de forma contraria, en que el gobierno se subordine a las condiciones impuestas por los grupos empresariales. 
+
+\pagebreak
+\renewcommand{\bibname}{Referencias}
+\addcontentsline{toc}{section}{Referencias}
+\bibliography{biblio.bib}
+
+
+\end{document}
